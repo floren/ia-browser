@@ -12,7 +12,9 @@
    (last-rows :accessor last-rows :initform 0
 	      :documentation "Most recent rows-per-page value")
    (last-page :accessor last-page :initform 0
-	      :documentation "Most recent page selection"))
+	      :documentation "Most recent page selection")
+   (last-mediatypes :accessor last-mediatypes :initform '()
+		    :documentation "Most recent mediatypes"))
   (:command-table (ia-command-table))
   (:panes
    (interactor :interactor
@@ -24,29 +26,49 @@
       interactor)))
   (:menu-bar t))
 
+(defun run-query-and-set-state (frame query rows page mediatypes)
+  "Runs the query and sets the state on the frame to reflect the query parameters"
+  (setf (last-query frame) query)
+  (setf (last-rows frame) rows)
+  (setf (last-page frame) page)
+  (setf (last-mediatypes frame) mediatypes)
+  (do-search query rows page mediatypes))
+
 (define-command (com-search :command-table ia-command-table :name "Search")
-    ;; Run a search on texts
+    ;; Run a search on all media types
     ((search-string 'string :prompt "Search string")
      (rows 'integer :prompt "Rows per page")
      (page 'integer :prompt "Page" :default 1))
   (progn
     (if (<= page 0)
 	(setf page 1))
-    ;; update state
-    (setf (last-query *application-frame*) search-string)
-    (setf (last-rows *application-frame*) rows)
-    (setf (last-page *application-frame*) page)
-    (let ((results (do-texts-search search-string rows page)))
-      (dump-results *standard-output* results))))
+    (dump-results *standard-output* (run-query-and-set-state *application-frame* search-string rows page '()))))
+
+(define-command (com-text-search :command-table ia-command-table :name "TextSearch")
+    ;; Run a search over texts
+    ((search-string 'string :prompt "Search string")
+     (rows 'integer :prompt "Rows per page" :default 4)
+     (page 'integer :prompt "Page" :default 1))
+  (dump-results *standard-output*
+		(run-query-and-set-state *application-frame* search-string rows page '("texts"))))
+
+(define-command (com-vid-search :command-table ia-command-table :name "VidSearch")
+    ;; Run a search over videos
+    ((search-string 'string :prompt "Search string")
+     (rows 'integer :prompt "Rows per page" :default 4)
+     (page 'integer :prompt "Page" :default 1))
+  (dump-results *standard-output*
+		(run-query-and-set-state *application-frame* search-string rows page '("movies"))))
 
 (define-command (com-next :command-table ia-command-table :name "Next")
     ;; Fetch the next page of results for the last search
     ()
   (let* ((query (last-query *application-frame*))
 	 (rows (last-rows *application-frame*))
-	 (page (+ 1 (last-page *application-frame*))))
+	 (page (+ 1 (last-page *application-frame*)))
+	 (mediatypes (last-mediatypes *application-frame*)))
     (if query
-	(com-search query rows page)
+	(dump-results *standard-output* (run-query-and-set-state *application-frame* query rows page mediatypes))
 	(with-drawing-options (t :ink +red+)
 	  (format t "No previous query! Run Search first")))))
 
@@ -55,18 +77,19 @@
     ()
   (let* ((query (last-query *application-frame*))
 	 (rows (last-rows *application-frame*))
-	 (page (- (last-page *application-frame*) 1)))
-    (if query
-	(if (> page 0)
-	    (com-search query rows page)
-	    (with-drawing-options (t :ink +red+)
-	      (format t "Already at beginning of search!")))
-	(with-drawing-options (t :ink +red+)
-	  (format t "No previous query! Run Search first")))))
+	 (page (- (last-page *application-frame*) 1))
+	 (mediatypes (last-mediatypes *application-frame*)))
+  (if query
+      (if (> page 0)
+	  (dump-results *standard-output* (run-query-and-set-state *application-frame* query rows page mediatypes))
+	  (with-drawing-options (t :ink +red+)
+	    (format t "Already at beginning of search!")))
+      (with-drawing-options (t :ink +red+)
+	(format t "No previous query! Run Search first")))))
 
 (define-command (com-select-item :command-table ia-command-table :name "Select")
     ((which-item 'ia-item :prompt "Item"))
-  (describe-item *standard-output* (fetch-metadata which-item)))
+  (describe-item *standard-output* which-item))
 
 (define-command (com-browser-open :command-table ia-command-table :name "BrowserOpen")
     ((which-item 'ia-item :prompt "Item"))
@@ -76,12 +99,45 @@
 			     :path (format nil "/details/~a" which-item)))))
     (uiop:launch-program (list "open" uri))))
 
+(define-command (com-open-file :command-table ia-command-table :name "OpenFile")
+    ((which-item 'ia-file :prompt "File"))
+  (let ((uri (quri:render-uri
+	      (quri:make-uri :scheme "https"
+			     :host "archive.org"
+			     :path (format nil "/download/~a" which-item)))))
+    (uiop:launch-program (list "open" uri))))
+
+
 (define-command (com-clear :command-table ia-command-table :name "Clear" :menu t)
     ()
   (window-clear *standard-output*))
 
-(defun describe-item (pane metadata)
-  (format pane "Title: ~a" (get-metadata-field :title metadata)))
+(defun desc-field (pane field metadata)
+  (with-drawing-options (t :ink +red2+)
+    (format pane "~a: " field))
+  (format pane "~a~%" (get-metadata-field field metadata)))
+
+(defun describe-item (pane identifier)
+  (let* ((metadata (fetch-metadata identifier))
+	 (text-pdf (get-file-info "Text PDF" metadata))
+	 (filename (cdr (assoc :name text-pdf))))
+    (desc-field pane :title metadata)
+    (desc-field pane :date metadata)
+    (desc-field pane :creator metadata)
+    (desc-field pane :collection metadata)
+    (desc-field pane :isbn metadata)
+    (desc-field pane :description metadata)
+    (if filename
+	(let ((path (format nil "~a/~a" identifier filename)))
+	  (terpri)
+	  (with-drawing-options (t :ink +red2+)
+	    (format pane "PDF: "))
+	  (surrounding-output-with-border (pane :shape :rectangle)
+	    (with-output-as-presentation (t path 'ia-file)
+	      (format pane "~a~%" path)))))))
+
+
+;  (format pane "~s" metadata))
 
 (defun dump-results (pane results)
   "Display results of do-search"
@@ -122,7 +178,7 @@
 	 (wrapped (bobbin:wrap shorter line-len)))
     wrapped))
 
-;; ia-item is a "thing" in the internet archive
+;;; ia-item is a "thing" in the internet archive
 (define-presentation-type ia-item ())
 
 (define-presentation-to-command-translator browser-open-ia-item
@@ -143,6 +199,17 @@
     (object)
   (list object))
 
+;;; ia-file is a specific file in the internet archive
+(define-presentation-type ia-file ())
+
+(define-presentation-to-command-translator open-ia-file
+    (ia-file com-open-file ia-command-table
+	     :menu t
+	     :gesture :select
+	     :documentation "Open file"
+	     :pointer-documentation "Open file")
+    (object)
+  (list object))
 
 (defun ia ()
   (setf frame (make-application-frame 'ia-app))

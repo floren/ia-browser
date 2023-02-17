@@ -81,3 +81,15 @@
   "Fetch the named field from the metadata object"
   (let ((meta (cdr (assoc :metadata obj))))
     (cdr (assoc field meta))))
+
+(defun get-file-info (format metadata)
+  "Get info block for a file of the given format in the metadata object"
+  (let ((files (cdr (assoc :files metadata))))
+    (find-format-in-file-list format files)))
+
+(defun find-format-in-file-list (format list)
+  (if list
+      (if (equal format (cdr (assoc :format (car list))))
+	  (car list)
+	  (find-format-in-file-list format (cdr list)))
+      nil))
