@@ -50,9 +50,6 @@
 (defgeneric list-item-name (object)
   (:documentation "return a string to represent the object in a list"))
 
-;; this is what gets displayed in the item picker list
-(defmethod list-item-name ((item ia-search-results))
-  (format nil "[~d] ~s" (slot-value item 'pane-id) (slot-value item 'last-query)))
 
 ;; Invoked when someone clicks an item in the search list.
 (defun search-picker-changed (pane value)
@@ -84,6 +81,10 @@
 		    :documentation "Most recent mediatypes")
    (current-results :accessor current-results :initform '() :initarg :current-results
 		    :documentation "The most recent set of results")))
+
+;; this is what gets displayed in the item picker list
+(defmethod list-item-name ((item ia-search-results))
+  (format nil "[~d] ~s" (slot-value item 'pane-id) (slot-value item 'last-query)))
 
 (defmethod next-results ((search ia-search-results))
   (incf (last-page search))
@@ -215,16 +216,6 @@
 			     :path (format nil "/download/~a" which-item)))))
     (uiop:launch-program (list "open" uri))))
 
-;;; close the tab with the given title
-(define-command (com-close-tab :command-table ia-command-table :name "CloseTab")
-    ((which-tab 'tab-page-name :prompt "Tab Name" :default (tab-page-title (tab-layout-enabled-page (ia-tab-layout)))))
-  (remove-page-named which-tab (ia-tab-layout)))
-  
-
-(define-command (com-clear :command-table ia-command-table :name "Clear")
-    ()
-  (window-clear *standard-output*))
-
 (defun desc-field (pane field metadata)
   (with-drawing-options (pane :ink +red2+)
     (format pane "~a: " field))
@@ -345,9 +336,6 @@
 	     :pointer-documentation "Open file")
     (object)
   (list object))
-
-;;; tab-page-name is the name of a tab page
-(define-presentation-type tab-page-name ())
 
 (defun ia ()
   (setf frame (make-application-frame 'ia-app))
