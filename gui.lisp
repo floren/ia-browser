@@ -10,7 +10,10 @@
 ;;; The main window itself
 ;;;
 (define-application-frame ia-app ()
-  ((last-query :accessor last-query :initform nil
+  ((counter :accessor counter :initform 0)
+   (searches :accessor searches :initform '())
+   (items :accessor items :initform '())
+   (last-query :accessor last-query :initform nil
 	       :documentation "Most recently-run query")
    (last-rows :accessor last-rows :initform 0
 	      :documentation "Most recent rows-per-page value")
@@ -22,39 +25,76 @@
 		    :documentation "The most recent set of results"))
   (:command-table (ia-command-table))
   (:panes
-   (results (make-clim-stream-pane :type 'results-pane :display-function 'display-results))
+   (search-picker :list-pane
+		  :name-key #'list-item-name
+		  :value-changed-callback 'search-picker-changed
+		  :mode :exclusive)
+   (item-picker :list-pane
+		;:name-key #'item-name
+		:mode :exclusive)
+   (results (make-clim-stream-pane :type 'application-pane :display-time nil))
    (interactor :interactor
 	       :name 'interactor
 	       :background +beige+
                :end-of-line-action :wrap*))
   (:layouts
    (default
-    (vertically ()
-      (7/8 (with-tab-layout ('tab-page :name 'ia-tabs)
-	     ("Search Results" results)))
-      (1/8 interactor)))))
+    (horizontally (:width 1600 :height 1200)
+      (1/5 (vertically ()
+	      (1/2 (labelling (:label "Searches") search-picker))
+	      (1/2 (labelling (:label "Items") item-picker))))
+      (4/5 (vertically ()
+	      (7/8 (labelling (:label "Display") (with-tab-layout ('tab-page :name 'ia-tabs)
+						   ("Search Results" results))))
+	      (1/8 interactor)))))))
 
-(defmethod display-results ((frame ia-app) pane)
-  (let ((results (slot-value frame 'current-results)))
-    (when results
-      (updating-output (pane :unique-id results)
-	(dump-results pane results)))))
+;; return the currently-selected query
+(defun selected-query ()
+  (clim:gadget-value (find-pane-named *application-frame* 'search-picker)))
 
-;;;
-;;; Displays search results
-;;;
-(defclass results-pane (application-pane)
-  ((last-query :accessor last-query :initform nil
+;; for displaying the lists
+(defgeneric list-item-name (object)
+  (:documentation "return a string to represent the object in a list"))
+
+(defmethod list-item-name ((item search-results))
+  (format nil "[~d] ~s" (slot-value item 'pane-id) (slot-value item 'last-query)))
+
+;; Invoked when someone clicks an item in the search list.
+;; Clears the results window and shows the current search results.
+(defun search-picker-changed (pane value)
+  (declare (ignore pane))
+  (let* ((output (get-frame-pane *application-frame* 'results))
+	 (current (current-results (selected-query))))
+    (when current
+      (window-clear output)
+      (display-results output current))))
+
+(defun search-picker-changed (pane value)
+  (declare (ignore pane))
+  (let* ((output (get-frame-pane *application-frame* 'results)))
+    (when value
+      (window-clear output)
+      (display-results output (current-results value)))))
+
+;; dump some results to a pane, does not clear or anything
+(defun display-results (pane value)
+  (dump-results pane value))
+
+;;; Manage results from a search
+(defclass search-results ()
+  ((pane-id :accessor pane-id :initarg :pane-id)
+   (last-query :accessor last-query :initform nil :initarg :last-query
 	       :documentation "Most recently-run query")
-   (last-rows :accessor last-rows :initform 0
+   (last-rows :accessor last-rows :initform 0 :initarg :last-rows
 	      :documentation "Most recent rows-per-page value")
-   (last-page :accessor last-page :initform 0
+   (last-page :accessor last-page :initform 0 :initarg :last-page
 	      :documentation "Most recent page selection")
-   (last-mediatypes :accessor last-mediatypes :initform '()
+   (last-mediatypes :accessor last-mediatypes :initform '() :initarg :last-mediatypes
 		    :documentation "Most recent mediatypes")
-   (current-results :accessor current-results :initform '()
+   (current-results :accessor current-results :initform '() :initarg :current-results
 		    :documentation "The most recent set of results")))
 
+;; dump some info about an item
 (defmethod display-item-info ((frame ia-app) pane)
   (let ((identifier (slot-value pane 'identifier))
 	(metadata (slot-value pane 'metadata)))
@@ -71,6 +111,8 @@
    (metadata :accessor metadata :initform nil :initarg :metadata
 	     :documentation "Metadata for the item")))
 
+(defmethod item-name ((pane item-pane))
+  (identifier pane))
 
 (defun find-or-create-search-tab (query mediatypes)
   (let* ((pages (tab-layout-pages (ia-tab-layout))))))
@@ -91,6 +133,30 @@
   (setf (last-mediatypes frame) mediatypes)
   (do-search query rows page mediatypes))
 
+(defmethod new-query ((frame ia-app) query rows page mediatypes)
+  (let* ((picker (find-pane-named frame 'search-picker))
+	 (item (make-instance
+		'search-results
+		:pane-id (incf (counter frame))
+		:last-query query
+		:last-rows rows
+		:last-page page
+		:last-mediatypes mediatypes
+		:current-results (do-search query rows page mediatypes))))
+    (push item (searches frame))
+    (setf (clime:list-pane-items picker) (searches frame))
+    (setf (gadget-value picker :invoke-callback t) item)))
+
+(define-command (com-newsearch :command-table ia-command-table :name "NewSearch")
+    ((search-string 'string :prompt "Search string")
+     (rows 'integer :prompt "Rows per page")
+     (page 'integer :prompt "Page" :default 1))
+  (progn
+    (if (<= page 0)
+	(setf page 1))
+    (new-query *application-frame* search-string rows page '())))
+
+
 ;;; Run a search on all media types
 (define-command (com-search :command-table ia-command-table :name "Search")
     ((search-string 'string :prompt "Search string")
@@ -99,8 +165,8 @@
   (progn
     (if (<= page 0)
 	(setf page 1))
-    (setf (current-results *application-frame*) (run-query-and-set-state *application-frame* search-string rows page '()))))
-
+    (setf (current-results *application-frame*)
+	  (run-query-and-set-state *application-frame* search-string rows page '()))))
 ;;; Run a search over texts
 (define-command (com-text-search :command-table ia-command-table :name "TextSearch")
     ((search-string 'string :prompt "Search string")
