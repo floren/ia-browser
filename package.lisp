@@ -2,7 +2,7 @@
 (in-package :cl-user)
 
 (defpackage :ia-browser
-  (:use :clim :clim-lisp :clim-extensions)
+  (:use :clim :clim-lisp :clim-sys :clim-extensions :clim-tab-layout)
   (:export :do-search
 	   :do-texts-search
 	   :fetch-thumbnail
