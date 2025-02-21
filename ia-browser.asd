@@ -13,4 +13,5 @@
 		 (:file "util")
 		 (:file "ia-api")
 		 (:file "cache")
+		 (:file "ia-types")
 		 (:file "gui")))
