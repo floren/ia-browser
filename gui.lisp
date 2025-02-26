@@ -23,7 +23,7 @@
 		:name-key #'list-item-name
 		:value-changed-callback 'item-picker-changed
 		:mode :exclusive)
-   (results (make-clim-stream-pane :type 'application-pane :display-time nil))
+   (results (make-clim-stream-pane :type 'application-pane :display-time nil :incremental-redisplay t :end-of-page-action :allow))
    (interactor :interactor
 	       :name 'interactor
 	       :background +beige+
@@ -210,5 +210,6 @@
   (setf frame (make-application-frame 'ia-app))
   (run-frame-top-level frame))
 
+(setf mcclim-truetype::*dpi* 90)
 (setf frame (make-application-frame 'ia-app))
 (run-frame-top-level frame)
